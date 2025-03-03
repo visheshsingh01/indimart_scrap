@@ -1,0 +1,14 @@
+[
+    {
+        "username": "example_user1",
+        "bio": "No bio available",
+        "followers": "0",
+        "following": "0"
+    },
+    {
+        "username": "example_user2",
+        "bio": "No bio available",
+        "followers": "0",
+        "following": "0"
+    }
+]
