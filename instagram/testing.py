@@ -1,3 +1,5 @@
+import time
+import json
 from selenium import webdriver 
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -6,8 +8,13 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
-import time
-import json
+
+# Selenium WebDriver setup
+options = webdriver.ChromeOptions()
+options.add_argument("--ignore-certificate-errors")
+options.add_argument("--log-level=3")
+# options.add_argument("--headless")  # Uncomment for headless mode
+browser = webdriver.Chrome(options=options)
 
 # Instagram credentials
 USERNAME = "vishesh@brancosoft.com"
@@ -17,35 +24,23 @@ if not USERNAME or not PASSWORD:
     raise ValueError("Instagram credentials are missing! Set them in environment variables.")
 
 def login_to_instagram(driver):
-    """Logs in to Instagram using the provided driver."""
-    driver.get('https://www.instagram.com/accounts/login/')
-    
-    # Wait for login fields
-    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.NAME, 'username')))
-
+    try:   
+        driver.get('https://www.instagram.com/accounts/login/')
+        WebDriverWait(driver, 20).until(
+            lambda d: d.execute_script('return document.readyState') == "complete"  
+        )
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.NAME, 'username')))
     # Enter username and password
-    driver.find_element(By.NAME, 'username').send_keys(USERNAME)
-    driver.find_element(By.NAME, 'password').send_keys(PASSWORD)
-    driver.find_element(By.NAME, 'password').send_keys(Keys.ENTER)
+        driver.find_element(By.NAME, 'username').send_keys(USERNAME)
+        driver.find_element(By.NAME, 'password').send_keys(PASSWORD)
+        driver.find_element(By.NAME, 'password').send_keys(Keys.ENTER)
 
-    # Wait for homepage to load
-    try:
-        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, "//nav")))
-        print("Login successful!")
-    except:
-        print("Login may have failed. Please check credentials.")
-
-    # Handle pop-ups
-    popups = ["//button[contains(text(), 'Not Now')]"]
-    for popup_xpath in popups:
-        try:
-            WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, popup_xpath))).click()
-            print(f"Closed pop-up: {popup_xpath}")
-        except:
-            pass
+        print("Login successfull")
+        time.sleep(3)
+    except Exception as e:
+        print(f"An error occurred with login: {e}")
 
 def scrape_instagram_profile(driver, target_username):
-    """Scrapes Instagram profile data."""
     url = f'https://www.instagram.com/{target_username}/'
     driver.get(url)
 
