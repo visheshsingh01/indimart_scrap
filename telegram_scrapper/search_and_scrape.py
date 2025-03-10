@@ -1,103 +1,113 @@
 import os
 import re
+import json
 from telethon.sync import TelegramClient
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 from telethon.tl.functions.contacts import SearchRequest
-from telethon.tl.types import ChannelParticipantsSearch
 
 # Replace with your credentials
 API_ID = 21562607          # Your API ID
-API_HASH = "a6dba1cf80b2a8b273222ac6b5e551e2" # Your API Hash
-KEYWORD = "crypto"         # Keyword to search for channels/groups
+API_HASH = "a6dba1cf80b2a8b273222ac6b5e551e2"  # Your API Hash
+KEYWORD = "dune movie"     # Keyword to search for channels/groups
 
-# Base directory for storing scraped data
+# Base directory for JSON output
 BASE_DIR = "scraped_data"
 os.makedirs(BASE_DIR, exist_ok=True)
 
 # Initialize the Telegram client (authentication is handled automatically)
 client = TelegramClient("session_keyword_scraper", API_ID, API_HASH)
 
+# Data structure to hold all scraped data
+scraped_data = {"channels": []}
+
 with client:
-    # ---------------------------
     # 1. Searching for Public Chats by Keyword
-    # ---------------------------
     result = client(SearchRequest(q=KEYWORD, limit=5))
     
     for chat in result.chats:
+        channel_info = {}
         channel_title = getattr(chat, 'title', 'No_Title')
-        safe_title = "".join(c for c in channel_title if c.isalnum() or c in " -_").rstrip()
+        channel_info["title"] = channel_title
+        channel_info["username"] = getattr(chat, 'username', None)
         
-        # Create a folder for this channel
-        channel_dir = os.path.join(BASE_DIR, safe_title)
-        os.makedirs(channel_dir, exist_ok=True)
-        print(f"\nFound Chat: {channel_title}")
-
-        # ---------------------------
         # 2. Optionally join the channel/group if required
-        # ---------------------------
         try:
             client(JoinChannelRequest(chat))
-            print(f"Joined {channel_title}")
+            channel_info["joined"] = True
         except Exception as e:
-            print(f"Could not join {channel_title}: {e}")
-
-        # ---------------------------
+            channel_info["joined"] = False
+            channel_info["join_error"] = str(e)
+        
         # 3. Get Channel/Group Membership and Engagement Metadata
-        # ---------------------------
         try:
             full = client(GetFullChannelRequest(chat))
-            member_count = full.full_chat.participants_count if hasattr(full.full_chat, 'participants_count') else "N/A"
-            print(f"Member Count for {channel_title}: {member_count}")
+            channel_info["member_count"] = (full.full_chat.participants_count 
+                                            if hasattr(full.full_chat, 'participants_count') 
+                                            else None)
         except Exception as e:
-            print(f"Could not get full channel info for {channel_title}: {e}")
-
-        # ---------------------------
+            channel_info["member_count"] = None
+            channel_info["full_info_error"] = str(e)
+        
+        # Prepare a list for posts
+        channel_info["posts"] = []
+        
         # 4. Scrape Messages and Associated Data
-        # ---------------------------
-        messages_file = os.path.join(channel_dir, "messages.txt")
-        with open(messages_file, "w", encoding="utf-8") as text_file:
-            for message in client.iter_messages(chat, limit=5):  # Adjust limit as needed
-                # Write basic metadata (timestamp, views, etc.)
-                text_file.write(f"Date: {message.date} | Views: {message.views}\n")
-                
-                # Write the message text if present
-                if message.text:
-                    text_file.write(f"Message: {message.text}\n")
-                    
-                    # Extract and log any URLs from the message text
-                    urls = re.findall(r'(https?://\S+)', message.text)
-                    if urls:
-                        text_file.write(f"URLs: {urls}\n")
-                
-                # Log geolocation if available
-                if message.geo:
-                    text_file.write(f"Geo: {message.geo}\n")
-                
-                text_file.write("-" * 50 + "\n")
-                
-                # Download media if present and log associated text with it
-                if message.media:
-                    media_path = message.download_media(file=channel_dir)
-                    if media_path:
-                        print(f"Downloaded media file: {media_path}")
-                        # Save associated text with the media file if any
-                        if message.text:
-                            base_name = os.path.splitext(os.path.basename(media_path))[0]
-                            media_text_file = os.path.join(channel_dir, f"{base_name}.txt")
-                            with open(media_text_file, "w", encoding="utf-8") as mf:
-                                mf.write(f"Date: {message.date}\nMessage: {message.text}\n")
-                    else:
-                        print("Media download returned None, skipping associated text.")
+        for message in client.iter_messages(chat, limit=5):  # Adjust limit as needed
+            post = {}
+            post["date"] = str(message.date)
+            post["views"] = message.views
+            post["message_text"] = message.text
+            post["urls"] = re.findall(r'(https?://\S+)', message.text) if message.text else []
+            post["geo"] = str(message.geo) if message.geo else None
 
-        # ---------------------------
+            # Check for reactions (if available)
+            if hasattr(message, 'reactions'):
+                try:
+                    post["reactions"] = message.reactions.stringify() if hasattr(message.reactions, "stringify") else str(message.reactions)
+                except Exception:
+                    post["reactions"] = str(message.reactions)
+            else:
+                post["reactions"] = None
+
+            # Check for replies (if available)
+            if hasattr(message, 'replies') and message.replies:
+                try:
+                    post["replies"] = message.replies.to_dict() if hasattr(message.replies, "to_dict") else str(message.replies)
+                except Exception:
+                    post["replies"] = str(message.replies)
+            else:
+                post["replies"] = None
+
+            # Instead of downloading media, store a media link if available.
+            # For public channels (with a username) you can build a permalink for the message.
+            if message.media and getattr(chat, 'username', None):
+                post["media"] = f"https://t.me/{chat.username}/{message.id}"
+
+            # Append this post to the channel's posts list
+            channel_info["posts"].append(post)
+        
         # 5. (Optional) Scrape Channel/Group Member List
-        # ---------------------------
         try:
             participants = client.get_participants(chat, limit=100)
-            members_file = os.path.join(channel_dir, "members.txt")
-            with open(members_file, "w", encoding="utf-8") as mf:
-                for user in participants:
-                    mf.write(f"User ID: {user.id} | Username: {user.username} | Name: {user.first_name} {user.last_name}\n")
-            print(f"Scraped {len(participants)} members for {channel_title}")
+            members = []
+            for user in participants:
+                members.append({
+                    "user_id": user.id,
+                    "username": user.username,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name
+                })
+            channel_info["members"] = members
         except Exception as e:
-            print(f"Could not scrape members for {channel_title}: {e}")
+            channel_info["members"] = []
+            channel_info["members_error"] = str(e)
+        
+        # Append this channel's data to our main scraped_data list
+        scraped_data["channels"].append(channel_info)
+
+# Save all collected data to a single JSON file
+json_path = os.path.join(BASE_DIR, "scraped_data.json")
+with open(json_path, "w", encoding="utf-8") as jf:
+    json.dump(scraped_data, jf, ensure_ascii=False, indent=4)
+
+print(f"Scraping complete! Data saved to {json_path}")
