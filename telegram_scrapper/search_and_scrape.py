@@ -4,14 +4,13 @@ import json
 from telethon.sync import TelegramClient
 from telethon.tl.functions.channels import GetFullChannelRequest, JoinChannelRequest
 from telethon.tl.functions.contacts import SearchRequest
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
-from telethon.utils import get_display_name
+from telethon.tl.types import MessageEntityMention, MessageEntityMentionName
 from telethon.tl.functions.users import GetFullUserRequest
 
 # Replace with your credentials
-API_ID = 21562607  # Your API ID
+API_ID = 21562607          # Your API ID
 API_HASH = "a6dba1cf80b2a8b273222ac6b5e551e2"  # Your API Hash
-KEYWORD = "putri"  # Keyword to search
+KEYWORD = "Diwakar"        # Keyword to search
 
 # Base directory for scraped data
 BASE_DIR = "scraped_data"
@@ -38,7 +37,8 @@ with client:
         chat_info = {
             "title": getattr(chat, 'title', 'No_Title'),
             "username": getattr(chat, 'username', None),
-            "is_channel": chat.broadcast if hasattr(chat, 'broadcast') else False
+            "is_channel": chat.broadcast if hasattr(chat, 'broadcast') else False,
+            "mentions": []  # Aggregate mentions for this channel if keyword appears
         }
         category = "channels" if chat_info["is_channel"] else "groups"
         
@@ -60,7 +60,7 @@ with client:
         
         # Scrape messages
         chat_info["posts"] = []
-        for message in client.iter_messages(chat, limit=10):
+        for message in client.iter_messages(chat, limit=10):  # Adjust limit as needed
             post = {
                 "date": str(message.date),
                 "views": message.views,
@@ -72,11 +72,23 @@ with client:
                 "media": None
             }
             
-            # Download media if available
-            if message.media:
-                media_path = os.path.join(MEDIA_DIR, f"{chat.id}_{message.id}")
-                media_file = client.download_media(message, file=media_path)
-                post["media"] = media_file if media_file else None
+            # Mention-based logic: only if the post text contains the keyword (case-insensitive)
+            if message.text and KEYWORD.lower() in message.text.lower() and message.entities:
+                mentions = []
+                for entity in message.entities:
+                    if isinstance(entity, (MessageEntityMention, MessageEntityMentionName)):
+                        # Extract the mention text using offset and length
+                        mention_text = message.text[entity.offset: entity.offset + entity.length]
+                        mentions.append(mention_text)
+                if mentions:
+                    # Add these mentions to the channel-level "mentions" list
+                    chat_info["mentions"].extend(mentions)
+                    # Also store them in the post itself if you want
+                    post["mentions"] = mentions
+            
+            # Instead of downloading media, store a media link if available (for public channels)
+            if message.media and getattr(chat, 'username', None):
+                post["media"] = f"https://t.me/{chat.username}/{message.id}"
             
             chat_info["posts"].append(post)
         
@@ -95,7 +107,7 @@ with client:
             "profile_picture": None
         }
         
-        # Download profile pictures
+        # Download profile picture (if available)
         profile_pic_path = os.path.join(MEDIA_DIR, f"profile_{user.id}.jpg")
         profile_pic = client.download_profile_photo(user, file=profile_pic_path)
         if profile_pic:
